@@ -15,23 +15,23 @@ with st.sidebar:
     api_key = st.text_input("OpenRouter API Key", type="password", value=os.getenv("OPENROUTER_API_KEY", ""))
     
     model_chat = st.selectbox("Chat Model (Scene Breakdown)", [
-        "x-ai/grok-4", 
+        "x-ai/grok-4.3",           # Recommended
         "anthropic/claude-3.5-sonnet",
         "google/gemini-2.0-flash-exp"
     ], index=0)
     
     model_video = st.selectbox("Video Model", ["x-ai/grok-imagine-video"], index=0)
     
-    st.info("💡 Use a strong chat model for better scene prompts.")
+    st.info("💡 Grok 4.3 is the current recommended model.")
 
 if not api_key:
-    st.warning("Enter your OpenRouter API Key in the sidebar to continue.")
+    st.warning("Enter your OpenRouter API Key in the sidebar.")
     st.stop()
 
 headers = {
     "Authorization": f"Bearer {api_key}",
     "Content-Type": "application/json",
-    "HTTP-Referer": "https://your-app.streamlit.app",  # Optional but recommended
+    "HTTP-Referer": "https://erostory.streamlit.app",
     "X-Title": "EroStory Animator"
 }
 
@@ -45,14 +45,14 @@ with tab1:
         if not story.strip():
             st.error("Please enter a story.")
         else:
-            with st.spinner("Analyzing story with Grok..."):
+            with st.spinner("Analyzing with Grok 4.3..."):
                 try:
                     payload = {
                         "model": model_chat,
                         "messages": [
                             {
                                 "role": "system",
-                                "content": "You are an expert erotic video director. Break the given story into 8-12 short, visually rich scenes (8-15 seconds each). For each scene output in clear format: **Scene X:** [title] **Prompt:** [highly detailed cinematic prompt with camera, motion, lighting, sensual details] **References needed:** [what images would help]"
+                                "content": "You are an expert erotic video director. Break the story into 8-12 short, visually rich scenes (8-15 seconds each). For each scene output clearly: **Scene X:** [short title] **Prompt:** [detailed cinematic prompt with motion, camera angles, lighting, sensual details] **References:** [suggested image types]"
                             },
                             {
                                 "role": "user",
@@ -62,75 +62,59 @@ with tab1:
                     }
                     
                     resp = requests.post("https://openrouter.ai/api/v1/chat/completions", 
-                                       json=payload, headers=headers, timeout=60)
-                    
-                    if resp.status_code == 404:
-                        st.error("404 Error: Check your model name or OpenRouter account status.")
+                                       json=payload, headers=headers, timeout=90)
                     resp.raise_for_status()
                     
                     result = resp.json()
                     scenes_text = result['choices'][0]['message']['content']
                     
                     st.session_state.scenes = scenes_text
-                    st.success("✅ Scenes generated successfully!")
-                    st.text_area("Generated Scenes (edit if needed)", scenes_text, height=500)
+                    st.success("✅ Scenes created successfully!")
+                    st.text_area("Generated Scenes (you can edit them)", scenes_text, height=500)
                     
-                except requests.exceptions.HTTPError as e:
-                    st.error(f"HTTP Error {resp.status_code}: {resp.text}")
                 except Exception as e:
-                    st.error(f"Error during analysis: {str(e)}")
+                    st.error(f"Error: {str(e)}")
+                    if "404" in str(e):
+                        st.error("Model not found. Try switching chat model in sidebar.")
 
 with tab2:
-    st.header("Character & Scene References")
-    uploaded_files = st.file_uploader("Upload reference images (faces, outfits, bodies, settings)", 
-                                    accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
-    
-    if uploaded_files:
-        st.success(f"{len(uploaded_files)} reference images uploaded")
-        for file in uploaded_files[:6]:  # Show preview
-            st.image(file, width=120, caption=file.name)
+    st.header("Character References")
+    uploaded = st.file_uploader("Upload images (Bunni, outfits, settings, etc.)", 
+                              accept_multiple_files=True, type=['png','jpg','jpeg'])
+    if uploaded:
+        st.success(f"{len(uploaded)} images ready")
+        for f in uploaded[:5]:
+            st.image(f, width=140, caption=f.name)
 
-    if 'scenes' in st.session_state and st.button("🎥 Generate Video Clips (Demo - First Scene)"):
-        with st.spinner("Generating video clip... (this may take 30-90 seconds)"):
+    if 'scenes' in st.session_state and st.button("🎥 Generate Sample Video Clip"):
+        with st.spinner("Calling Grok Imagine Video..."):
             try:
-                test_prompt = "Sensual intimate scene in a moving car, beautiful woman in short dress with collar, aroused expression, cinematic lighting."
+                sample_prompt = "Beautiful young woman in short dress and collar in a moving luxury car, sensual and submissive expression, cinematic lighting."
+                payload = {"model": model_video, "prompt": sample_prompt}
                 
-                video_payload = {
-                    "model": model_video,
-                    "prompt": test_prompt
-                }
-                
-                resp = requests.post("https://openrouter.ai/api/v1/videos", 
-                                   json=video_payload, headers=headers)
+                resp = requests.post("https://openrouter.ai/api/v1/videos", json=payload, headers=headers)
                 resp.raise_for_status()
                 job = resp.json()
                 
                 polling_url = job.get("polling_url")
                 if polling_url:
-                    for i in range(20):
+                    for _ in range(25):
                         time.sleep(25)
-                        poll = requests.get(polling_url, headers=headers)
-                        status = poll.json()
+                        status_resp = requests.get(polling_url, headers=headers)
+                        status = status_resp.json()
                         if status.get("status") == "completed":
                             video_url = status.get("unsigned_urls", [None])[0]
                             if video_url:
-                                st.success("✅ Video generated!")
+                                st.success("Video ready!")
                                 st.video(video_url)
-                                st.download_button("⬇️ Download Clip", requests.get(video_url).content, 
-                                                 f"clip_{datetime.now().strftime('%H%M')}.mp4", "video/mp4")
+                                st.download_button("Download", requests.get(video_url).content, "clip.mp4", "video/mp4")
                             break
-                        elif status.get("status") == "failed":
-                            st.error("Generation failed")
-                            break
-                    else:
-                        st.warning("Taking longer than expected...")
             except Exception as e:
-                st.error(f"Video generation error: {str(e)}")
+                st.error(f"Video error: {str(e)}")
 
 with tab3:
     st.header("Final Assembly")
-    st.info("Download clips from above and use this ffmpeg command locally:")
-    st.code("""ffmpeg -f concat -safe 0 -i mylist.txt -c copy final_erotic_video.mp4""", language="bash")
-    st.caption("Create mylist.txt with all clip paths.")
+    st.info("Download your clips and stitch them locally with ffmpeg:")
+    st.code("ffmpeg -f concat -safe 0 -i clips.txt -c copy final_video.mp4", language="bash")
 
-st.caption("EroStory Animator • Streamlit + OpenRouter • For personal use only")
+st.caption("EroStory Animator • Personal use only")
